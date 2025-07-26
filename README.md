@@ -71,6 +71,34 @@ export default nextConfig;
 ```
 If someone smarter than me knows how to include an optional JS build from a TS library please submit a PR. I just don't want to deploy a compiled version of this and wind up having folks doubling up on an already gargantuan dependency.
 
+## Telemetry
+
+Passkey kit can emit OpenTelemetry traces. Telemetry is disabled by default and can
+be configured in code or via environment variables.
+
+```ts
+import { TelemetryService } from "passkey-kit/telemetry"
+
+TelemetryService.init({
+  enabled: true,
+  serviceName: "my-passkey-service",
+  exporter: {
+    type: "otlp",
+    endpoint: "http://localhost:4318",
+    headers: { Authorization: "Bearer my-token" }
+  }
+})
+```
+
+Environment variables:
+
+```bash
+TELEMETRY_ENABLED=true
+TELEMETRY_SERVICE_NAME=passkey-kit
+TELEMETRY_EXPORTER_TYPE=otlp
+TELEMETRY_OTLP_ENDPOINT=http://localhost:4318
+```
+
 ## Contributing 
 
 Passkey kit consists of three primary directories:

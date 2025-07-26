@@ -6,6 +6,7 @@ import type { Signer } from "./types"
 import { AssembledTransaction } from "@stellar/stellar-sdk/minimal/contract"
 import { Durability } from "@stellar/stellar-sdk/minimal/rpc"
 import { version } from '../package.json'
+import { TelemetryService } from "./telemetry/TelemetryService"
 
 // TODO set default headers in constructor
 
@@ -65,10 +66,13 @@ export class PasskeyServer extends PasskeyBase {
     }
 
     public async getSigners(contractId: string) {
-        if (!this.rpc || !this.mercuryProjectName || !this.mercuryUrl || (!this.mercuryJwt && !this.mercuryKey))
-            throw new Error('Mercury service not configured')
+        const tracer = TelemetryService.getTracer('passkey-kit')
+        const span = tracer.startSpan('server.getSigners')
+        try {
+            if (!this.rpc || !this.mercuryProjectName || !this.mercuryUrl || (!this.mercuryJwt && !this.mercuryKey))
+                throw new Error('Mercury service not configured')
 
-        const signers = await fetch(`${this.mercuryUrl}/zephyr/execute`, {
+            const signers = await fetch(`${this.mercuryUrl}/zephyr/execute`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -93,7 +97,7 @@ export class PasskeyServer extends PasskeyBase {
                 throw await res.json()
             })
 
-        for (const signer of signers) {
+            for (const signer of signers) {
             if (signer.storage === 'Temporary') {
                 try {
                     await this.rpc.getContractData(contractId, xdr.ScVal.scvBytes(base64url.toBuffer(signer.key)), Durability.Temporary)
@@ -101,9 +105,16 @@ export class PasskeyServer extends PasskeyBase {
                     signer.evicted = true
                 }
             }
-        }
+            }
 
-        return signers as Signer[]
+            span.setStatus({ code: 1 })
+            return signers as Signer[]
+        } catch (e) {
+            span.recordException(e)
+            throw e
+        } finally {
+            span.end()
+        }
     }
 
     public async getContractId(options: {
@@ -111,10 +122,13 @@ export class PasskeyServer extends PasskeyBase {
         publicKey?: string,
         policy?: string,
     }, index = 0) {
-        if (!this.mercuryProjectName || !this.mercuryUrl || (!this.mercuryJwt && !this.mercuryKey))
-            throw new Error('Mercury service not configured')
+        const tracer = TelemetryService.getTracer('passkey-kit')
+        const span = tracer.startSpan('server.getContractId')
+        try {
+            if (!this.mercuryProjectName || !this.mercuryUrl || (!this.mercuryJwt && !this.mercuryKey))
+                throw new Error('Mercury service not configured')
 
-        let { keyId, publicKey, policy } = options || {}
+            let { keyId, publicKey, policy } = options || {}
 
         if ([keyId, publicKey, policy].filter((arg) => !!arg).length > 1)
             throw new Error('Exactly one of `options.keyId`, `options.publicKey`, or `options.policy` must be provided.');
@@ -128,7 +142,7 @@ export class PasskeyServer extends PasskeyBase {
         else if (policy)
             args = { key: policy, kind: 'Policy' }
 
-        const res = await fetch(`${this.mercuryUrl}/zephyr/execute`, {
+            const res = await fetch(`${this.mercuryUrl}/zephyr/execute`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -151,7 +165,14 @@ export class PasskeyServer extends PasskeyBase {
                 throw await res.json()
             })
 
-        return res[index]
+            span.setStatus({ code: 1 })
+            return res[index]
+        } catch (e) {
+            span.recordException(e)
+            throw e
+        } finally {
+            span.end()
+        }
     }
 
     /* LATER
@@ -159,13 +180,16 @@ export class PasskeyServer extends PasskeyBase {
     */
 
     public async send<T>(
-        txn: AssembledTransaction<T> | Tx | string, 
+        txn: AssembledTransaction<T> | Tx | string,
         fee?: number,
     ) {
-        if (!this.launchtubeUrl)
-            throw new Error('Launchtube service not configured')
+        const tracer = TelemetryService.getTracer('passkey-kit')
+        const span = tracer.startSpan('server.send')
+        try {
+            if (!this.launchtubeUrl)
+                throw new Error('Launchtube service not configured')
 
-        const data = new FormData();
+            const data = new FormData();
 
         if (txn instanceof AssembledTransaction) {
             txn = txn.built!.toXDR()
@@ -186,7 +210,7 @@ export class PasskeyServer extends PasskeyBase {
         if (this.launchtubeJwt)
             lt_headers.authorization = `Bearer ${this.launchtubeJwt}`
 
-        return fetch(this.launchtubeUrl, {
+            return fetch(this.launchtubeUrl, {
             method: 'POST',
             headers: lt_headers,
             body: data
@@ -194,6 +218,13 @@ export class PasskeyServer extends PasskeyBase {
             if (res.ok)
             return res.json()
             else throw await res.json()
-        })
+            })
+        } catch (e) {
+            span.recordException(e)
+            throw e
+        } finally {
+            span.setStatus({ code: 1 })
+            span.end()
+        }
     }
 }

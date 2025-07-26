@@ -3,3 +3,9 @@ export { PasskeyKit } from "./kit"
 export { PasskeyServer } from "./server"
 export { SACClient } from "./sac"
 export { Client as PasskeyClient } from 'passkey-kit-sdk'
+export * from './telemetry'
+
+import { TelemetryService } from './telemetry/TelemetryService'
+import { getTelemetryConfigFromEnv } from './telemetry/env'
+
+TelemetryService.init(getTelemetryConfigFromEnv())
