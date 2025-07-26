@@ -7,6 +7,7 @@ import { AssembledTransaction } from "@stellar/stellar-sdk/minimal/contract"
 import { Durability } from "@stellar/stellar-sdk/minimal/rpc"
 import { version } from '../package.json'
 import { TelemetryService } from "./telemetry/TelemetryService"
+import { SpanStatusCode } from "@opentelemetry/api"
 
 // TODO set default headers in constructor
 
@@ -67,7 +68,11 @@ export class PasskeyServer extends PasskeyBase {
 
     public async getSigners(contractId: string) {
         const tracer = TelemetryService.getTracer('passkey-kit')
-        const span = tracer.startSpan('server.getSigners')
+        const span = tracer.startSpan('server.getSigners', {
+            attributes: {
+                'passkey.contractId': contractId
+            }
+        })
         try {
             if (!this.rpc || !this.mercuryProjectName || !this.mercuryUrl || (!this.mercuryJwt && !this.mercuryKey))
                 throw new Error('Mercury service not configured')
@@ -107,10 +112,13 @@ export class PasskeyServer extends PasskeyBase {
             }
             }
 
-            span.setStatus({ code: 1 })
+            span.setAttributes({
+                'passkey.signers.count': signers.length
+            })
+            span.setStatus({ code: SpanStatusCode.OK })
             return signers as Signer[]
         } catch (e) {
-            span.recordException(e)
+            span.recordException(e as Error)
             throw e
         } finally {
             span.end()
@@ -123,7 +131,12 @@ export class PasskeyServer extends PasskeyBase {
         policy?: string,
     }, index = 0) {
         const tracer = TelemetryService.getTracer('passkey-kit')
-        const span = tracer.startSpan('server.getContractId')
+        const span = tracer.startSpan('server.getContractId', {
+            attributes: {
+                'passkey.searchBy': options.keyId ? 'keyId' : options.publicKey ? 'publicKey' : 'policy',
+                'passkey.index': index
+            }
+        })
         try {
             if (!this.mercuryProjectName || !this.mercuryUrl || (!this.mercuryJwt && !this.mercuryKey))
                 throw new Error('Mercury service not configured')
@@ -165,10 +178,14 @@ export class PasskeyServer extends PasskeyBase {
                 throw await res.json()
             })
 
-            span.setStatus({ code: 1 })
+            span.setAttributes({
+                'passkey.contractId': res[index],
+                'passkey.results.count': res.length
+            })
+            span.setStatus({ code: SpanStatusCode.OK })
             return res[index]
         } catch (e) {
-            span.recordException(e)
+            span.recordException(e as Error)
             throw e
         } finally {
             span.end()
@@ -210,20 +227,22 @@ export class PasskeyServer extends PasskeyBase {
         if (this.launchtubeJwt)
             lt_headers.authorization = `Bearer ${this.launchtubeJwt}`
 
-            return fetch(this.launchtubeUrl, {
-            method: 'POST',
-            headers: lt_headers,
-            body: data
-        }).then(async (res) => {
-            if (res.ok)
-            return res.json()
-            else throw await res.json()
+            const result = await fetch(this.launchtubeUrl, {
+                method: 'POST',
+                headers: lt_headers,
+                body: data
+            }).then(async (res) => {
+                if (res.ok)
+                    return res.json()
+                else throw await res.json()
             })
+            
+            span.setStatus({ code: SpanStatusCode.OK })
+            return result
         } catch (e) {
-            span.recordException(e)
+            span.recordException(e as Error)
             throw e
         } finally {
-            span.setStatus({ code: 1 })
             span.end()
         }
     }
