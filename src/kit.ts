@@ -8,6 +8,7 @@ import type { SignerKey, SignerLimits, SignerStore } from './types'
 import { PasskeyBase } from './base'
 import { AssembledTransaction, basicNodeSigner, type AssembledTransactionOptions, type Tx } from '@stellar/stellar-sdk/minimal/contract'
 import type { Server } from '@stellar/stellar-sdk/minimal/rpc'
+import { TelemetryService } from "./telemetry/TelemetryService"
 
 export class PasskeyKit extends PasskeyBase {
     declare rpc: Server
@@ -54,9 +55,12 @@ export class PasskeyKit extends PasskeyBase {
     }
 
     public async createWallet(app: string, user: string) {
-        const { rawResponse, keyId, keyIdBase64, publicKey } = await this.createKey(app, user)
+        const tracer = TelemetryService.getTracer('passkey-kit')
+        const span = tracer.startSpan('wallet.create')
+        try {
+            const { rawResponse, keyId, keyIdBase64, publicKey } = await this.createKey(app, user)
 
-        const at = await PasskeyClient.deploy(
+            const at = await PasskeyClient.deploy(
             {
                 signer: {
                     tag: 'Secp256r1',
@@ -79,24 +83,31 @@ export class PasskeyKit extends PasskeyBase {
             }
         )
 
-        const contractId = at.result.options.contractId
+            const contractId = at.result.options.contractId
 
-        this.wallet = new PasskeyClient({
-            contractId,
-            networkPassphrase: this.networkPassphrase,
-            rpcUrl: this.rpcUrl
-        })
+            this.wallet = new PasskeyClient({
+                contractId,
+                networkPassphrase: this.networkPassphrase,
+                rpcUrl: this.rpcUrl
+            })
 
-        await at.sign({
-            signTransaction: basicNodeSigner(this.walletKeypair, this.networkPassphrase).signTransaction
-        })
+            await at.sign({
+                signTransaction: basicNodeSigner(this.walletKeypair, this.networkPassphrase).signTransaction
+            })
 
-        return {
-            rawResponse,
-            keyId,
-            keyIdBase64,
-            contractId,
-            signedTx: at.signed!
+            span.setStatus({ code: 1 })
+            return {
+                rawResponse,
+                keyId,
+                keyIdBase64,
+                contractId,
+                signedTx: at.signed!
+            }
+        } catch (e) {
+            span.recordException(e)
+            throw e
+        } finally {
+            span.end()
         }
     }
 
@@ -104,7 +115,10 @@ export class PasskeyKit extends PasskeyBase {
         rpId?: string
         authenticatorSelection?: AuthenticatorSelectionCriteria
     }) {
-        const now = new Date()
+        const tracer = TelemetryService.getTracer('passkey-kit')
+        const span = tracer.startSpan('wallet.createKey')
+        try {
+            const now = new Date()
         const displayName = `${user} — ${now.toLocaleString()}`
         const { rpId, authenticatorSelection = {
             residentKey: "preferred",
@@ -116,7 +130,7 @@ export class PasskeyKit extends PasskeyBase {
         // In this case we should save the passkey info and retry uploading it async vs asking the user to create another passkey
         // This does introduce a storage dependency though so it likely needs to be a function with some logic for choosing how to store the passkey data
 
-        const rawResponse = await this.WebAuthn.startRegistration({
+            const rawResponse = await this.WebAuthn.startRegistration({
             optionsJSON: {
                 challenge: base64url("stellaristhebetterblockchain"),
                 rp: {
@@ -132,16 +146,23 @@ export class PasskeyKit extends PasskeyBase {
                 pubKeyCredParams: [{ alg: -7, type: "public-key" }],
             }
         });
-        const { id, response } = rawResponse
+            const { id, response } = rawResponse
 
-        if (!this.keyId)
-            this.keyId = id;
+            if (!this.keyId)
+                this.keyId = id;
 
-        return {
-            rawResponse,
-            keyId: base64url.toBuffer(id),
-            keyIdBase64: id,
-            publicKey: await this.getPublicKey(response),
+            span.setStatus({ code: 1 })
+            return {
+                rawResponse,
+                keyId: base64url.toBuffer(id),
+                keyIdBase64: id,
+                publicKey: await this.getPublicKey(response),
+            }
+        } catch (e) {
+            span.recordException(e)
+            throw e
+        } finally {
+            span.end()
         }
     }
 
@@ -153,9 +174,13 @@ export class PasskeyKit extends PasskeyBase {
         // Consider putting this somewhere else??
         walletPublicKey?: string
     }) {
+        const tracer = TelemetryService.getTracer('passkey-kit')
+        const span = tracer.startSpan('wallet.connect')
         let { rpId, keyId, getContractId, walletPublicKey } = opts || {}
         let keyIdBuffer: Buffer
         let rawResponse: AuthenticationResponseJSON | undefined;
+
+        try {
 
         if (!keyId) {
             rawResponse = await this.WebAuthn.startAuthentication({
@@ -206,20 +231,27 @@ export class PasskeyKit extends PasskeyBase {
         }
         ////
 
-        if (!contractId)
-            throw new Error('Failed to connect wallet')
+            if (!contractId)
+                throw new Error('Failed to connect wallet')
 
-        this.wallet = new PasskeyClient({
-            contractId,
-            rpcUrl: this.rpcUrl,
-            networkPassphrase: this.networkPassphrase,
-        })
+            this.wallet = new PasskeyClient({
+                contractId,
+                rpcUrl: this.rpcUrl,
+                networkPassphrase: this.networkPassphrase,
+            })
 
-        return {
-            rawResponse,
-            keyId: keyIdBuffer,
-            keyIdBase64: keyId,
-            contractId
+            span.setStatus({ code: 1 })
+            return {
+                rawResponse,
+                keyId: keyIdBuffer,
+                keyIdBase64: keyId,
+                contractId
+            }
+        } catch (e) {
+            span.recordException(e)
+            throw e
+        } finally {
+            span.end()
         }
     }
 
@@ -233,7 +265,11 @@ export class PasskeyKit extends PasskeyBase {
             expiration?: number
         }
     ) {
+        const tracer = TelemetryService.getTracer('passkey-kit')
+        const span = tracer.startSpan('wallet.signAuthEntry')
         let { rpId, keyId, keypair, policy, expiration } = options || {}
+
+        try {
 
         if ([keyId, keypair, policy].filter((arg) => !!arg).length > 1)
             throw new Error('Exactly one of `options.keyId`, `options.keypair`, or `options.policy` must be provided.');
@@ -410,7 +446,14 @@ export class PasskeyKit extends PasskeyBase {
         //     )
         // })
 
-        return entry
+            span.setStatus({ code: 1 })
+            return entry
+        } catch (e) {
+            span.recordException(e)
+            throw e
+        } finally {
+            span.end()
+        }
     }
 
     public async sign<T>(
@@ -423,7 +466,10 @@ export class PasskeyKit extends PasskeyBase {
             expiration?: number
         }
     ) {
-        if (!(txn instanceof AssembledTransaction)) {
+        const tracer = TelemetryService.getTracer('passkey-kit')
+        const span = tracer.startSpan('wallet.sign')
+        try {
+            if (!(txn instanceof AssembledTransaction)) {
             try {
                 txn = AssembledTransaction.fromXDR(this.wallet!.options, typeof txn === 'string' ? txn : txn.toXDR(), this.wallet!.spec)
             } catch {
@@ -439,15 +485,21 @@ export class PasskeyKit extends PasskeyBase {
             }
         }
 
-        await txn.signAuthEntries({
+            await txn.signAuthEntries({
             address: this.wallet!.options.contractId,
             authorizeEntry: (entry) => {
                 const clone = xdr.SorobanAuthorizationEntry.fromXDR(entry.toXDR())
                 return this.signAuthEntry(clone, options)
             },
         })
-
-        return txn
+            span.setStatus({ code: 1 })
+            return txn
+        } catch (e) {
+            span.recordException(e)
+            throw e
+        } finally {
+            span.end()
+        }
     }
 
     public addSecp256r1(keyId: string | Uint8Array, publicKey: string | Uint8Array, limits: SignerLimits, store: SignerStore, expiration?: number) {
