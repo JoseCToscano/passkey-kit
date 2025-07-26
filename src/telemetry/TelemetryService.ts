@@ -1,6 +1,5 @@
-import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node"
+import { NodeTracerProvider, BatchSpanProcessor, ConsoleSpanExporter, TraceIdRatioBasedSampler } from "@opentelemetry/sdk-trace-node"
 import { trace } from "@opentelemetry/api"
-import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base"
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http"
 import type { TelemetryConfig } from "./types"
 
@@ -11,7 +10,6 @@ export class TelemetryService {
         if (!config.enabled || isInitialized)
             return
 
-        const provider = new NodeTracerProvider()
         const { type, endpoint, headers, exporterInstance } = config.exporter
 
         let exporter: any
@@ -19,7 +17,6 @@ export class TelemetryService {
         if (type === "otlp") {
             exporter = new OTLPTraceExporter({ url: endpoint, headers })
         } else if (type === "console") {
-            const { ConsoleSpanExporter } = require("@opentelemetry/exporter-trace-console")
             exporter = new ConsoleSpanExporter()
         } else if (type === "custom" && exporterInstance) {
             exporter = exporterInstance
@@ -28,7 +25,11 @@ export class TelemetryService {
             return
         }
 
-        provider.addSpanProcessor(new BatchSpanProcessor(exporter))
+        const provider = new NodeTracerProvider({
+            sampler: new TraceIdRatioBasedSampler(config.samplingRate ?? 1.0),
+            spanProcessors: [new BatchSpanProcessor(exporter)]
+        })
+        
         provider.register()
 
         isInitialized = true

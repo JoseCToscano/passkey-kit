@@ -9,6 +9,7 @@ import { PasskeyBase } from './base'
 import { AssembledTransaction, basicNodeSigner, type AssembledTransactionOptions, type Tx } from '@stellar/stellar-sdk/minimal/contract'
 import type { Server } from '@stellar/stellar-sdk/minimal/rpc'
 import { TelemetryService } from "./telemetry/TelemetryService"
+import { SpanStatusCode } from "@opentelemetry/api"
 
 export class PasskeyKit extends PasskeyBase {
     declare rpc: Server
@@ -56,7 +57,13 @@ export class PasskeyKit extends PasskeyBase {
 
     public async createWallet(app: string, user: string) {
         const tracer = TelemetryService.getTracer('passkey-kit')
-        const span = tracer.startSpan('wallet.create')
+        const span = tracer.startSpan('wallet.create', {
+            attributes: {
+                'passkey.app': app,
+                'passkey.user': user,
+                'passkey.network': this.networkPassphrase
+            }
+        })
         try {
             const { rawResponse, keyId, keyIdBase64, publicKey } = await this.createKey(app, user)
 
@@ -95,7 +102,11 @@ export class PasskeyKit extends PasskeyBase {
                 signTransaction: basicNodeSigner(this.walletKeypair, this.networkPassphrase).signTransaction
             })
 
-            span.setStatus({ code: 1 })
+            span.setAttributes({
+                'passkey.contractId': contractId,
+                'passkey.keyId': keyIdBase64
+            })
+            span.setStatus({ code: SpanStatusCode.OK })
             return {
                 rawResponse,
                 keyId,
@@ -104,7 +115,7 @@ export class PasskeyKit extends PasskeyBase {
                 signedTx: at.signed!
             }
         } catch (e) {
-            span.recordException(e)
+            span.recordException(e as Error)
             throw e
         } finally {
             span.end()
@@ -151,7 +162,7 @@ export class PasskeyKit extends PasskeyBase {
             if (!this.keyId)
                 this.keyId = id;
 
-            span.setStatus({ code: 1 })
+            span.setStatus({ code: SpanStatusCode.OK })
             return {
                 rawResponse,
                 keyId: base64url.toBuffer(id),
@@ -159,7 +170,7 @@ export class PasskeyKit extends PasskeyBase {
                 publicKey: await this.getPublicKey(response),
             }
         } catch (e) {
-            span.recordException(e)
+            span.recordException(e as Error)
             throw e
         } finally {
             span.end()
@@ -175,7 +186,13 @@ export class PasskeyKit extends PasskeyBase {
         walletPublicKey?: string
     }) {
         const tracer = TelemetryService.getTracer('passkey-kit')
-        const span = tracer.startSpan('wallet.connect')
+        const span = tracer.startSpan('wallet.connect', {
+            attributes: {
+                'passkey.network': this.networkPassphrase,
+                'passkey.rpId': opts?.rpId || 'localhost',
+                'passkey.hasKeyId': !!opts?.keyId
+            }
+        })
         let { rpId, keyId, getContractId, walletPublicKey } = opts || {}
         let keyIdBuffer: Buffer
         let rawResponse: AuthenticationResponseJSON | undefined;
@@ -240,7 +257,11 @@ export class PasskeyKit extends PasskeyBase {
                 networkPassphrase: this.networkPassphrase,
             })
 
-            span.setStatus({ code: 1 })
+            span.setAttributes({
+                'passkey.contractId': contractId,
+                'passkey.keyId': keyId
+            })
+            span.setStatus({ code: SpanStatusCode.OK })
             return {
                 rawResponse,
                 keyId: keyIdBuffer,
@@ -248,7 +269,7 @@ export class PasskeyKit extends PasskeyBase {
                 contractId
             }
         } catch (e) {
-            span.recordException(e)
+            span.recordException(e as Error)
             throw e
         } finally {
             span.end()
@@ -446,10 +467,10 @@ export class PasskeyKit extends PasskeyBase {
         //     )
         // })
 
-            span.setStatus({ code: 1 })
+            span.setStatus({ code: SpanStatusCode.OK })
             return entry
         } catch (e) {
-            span.recordException(e)
+            span.recordException(e as Error)
             throw e
         } finally {
             span.end()
@@ -492,10 +513,10 @@ export class PasskeyKit extends PasskeyBase {
                 return this.signAuthEntry(clone, options)
             },
         })
-            span.setStatus({ code: 1 })
+            span.setStatus({ code: SpanStatusCode.OK })
             return txn
         } catch (e) {
-            span.recordException(e)
+            span.recordException(e as Error)
             throw e
         } finally {
             span.end()
