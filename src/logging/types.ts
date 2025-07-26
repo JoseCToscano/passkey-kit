@@ -1,8 +1,11 @@
-export type { Transform } from "stream";
+import { Transform } from "stream";
+
 export interface LoggingConfig {
   name?: string;
   level?: 'info' | 'debug' | 'error' | 'warn';
-  transports?: Record<string, Transform>;
+  transports?: Record<string, LoggerTransport>;
 }
 
-export interface LoggerTransport extends Transform {}
+export interface LoggerTransport extends Transform {
+  retrieveLogs?: () => Promise<any[]> | any[];
+}

@@ -105,7 +105,9 @@ export class PasskeyServer extends PasskeyBase {
             if (signer.storage === 'Temporary') {
                 try {
                     await this.rpc.getContractData(contractId, xdr.ScVal.scvBytes(base64url.toBuffer(signer.key)), Durability.Temporary)
-                } catch {
+                } catch (error) {
+                    const logger = LoggingService.get()
+                    logger.debug('server.get_signer.evicted', { contractId, signerKey: signer.key, error: error instanceof Error ? error.message : String(error) })
                     signer.evicted = true
                 }
             }
@@ -195,7 +197,7 @@ export class PasskeyServer extends PasskeyBase {
         if (this.launchtubeJwt)
             lt_headers.authorization = `Bearer ${this.launchtubeJwt}`
 
-        logger.info('server.send', { xdr: txn })
+        logger.info('server.send.success', { xdr: txn })
         return fetch(this.launchtubeUrl, {
             method: 'POST',
             headers: lt_headers,

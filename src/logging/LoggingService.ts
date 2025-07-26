@@ -1,12 +1,18 @@
 import pino from 'pino';
 import pretty from 'pino-pretty';
-import type { LoggingConfig } from './types';
-import type { Transform } from 'stream';
+import type { LoggingConfig, LoggerTransport } from './types';
+import { Transform } from 'stream';
 
 let logger: pino.Logger | undefined;
 
 function isPinoLogger(obj: any): obj is pino.Logger {
-  return obj && typeof obj.info === 'function' && typeof obj.error === 'function';
+  return obj && 
+    typeof obj === 'object' &&
+    typeof obj.info === 'function' && 
+    typeof obj.error === 'function' &&
+    typeof obj.warn === 'function' &&
+    typeof obj.debug === 'function' &&
+    typeof obj.child === 'function';
 }
 
 export class LoggingService {
@@ -36,6 +42,15 @@ export class LoggingService {
   }
 }
 
-export function createCustomTransport(transform: Transform): Transform {
-  return transform;
+export function createCustomTransport(transform: Transform): LoggerTransport {
+  const transport = transform as LoggerTransport;
+  
+  // Add optional retrieveLogs method if not present
+  if (!transport.retrieveLogs) {
+    transport.retrieveLogs = () => {
+      throw new Error('retrieveLogs not implemented for this transport');
+    };
+  }
+  
+  return transport;
 }
