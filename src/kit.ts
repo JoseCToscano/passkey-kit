@@ -8,6 +8,9 @@ import type { SignerKey, SignerLimits, SignerStore } from './types'
 import { PasskeyBase } from './base'
 import { AssembledTransaction, basicNodeSigner, type AssembledTransactionOptions, type Tx } from '@stellar/stellar-sdk/minimal/contract'
 import type { Server } from '@stellar/stellar-sdk/minimal/rpc'
+import { LoggingService } from './logging'
+import type { LoggingConfig } from './logging'
+import type pino from 'pino'
 
 export class PasskeyKit extends PasskeyBase {
     declare rpc: Server
@@ -34,11 +37,15 @@ export class PasskeyKit extends PasskeyBase {
         WebAuthn?: {
             startRegistration: typeof startRegistration,
             startAuthentication: typeof startAuthentication
-        }
+        },
+        logging?: LoggingConfig | pino.Logger
     }) {
-        const { rpcUrl, networkPassphrase, walletWasmHash, WebAuthn } = options
+        const { rpcUrl, networkPassphrase, walletWasmHash, WebAuthn, logging } = options
 
         super(rpcUrl)
+
+        if (logging)
+            LoggingService.init(logging)
 
         this.networkPassphrase = networkPassphrase
         // this account exists as the seed source for deploying new wallets
@@ -54,6 +61,8 @@ export class PasskeyKit extends PasskeyBase {
     }
 
     public async createWallet(app: string, user: string) {
+        const logger = LoggingService.get()
+        logger.info('wallet.createWallet.start', { app, user })
         const { rawResponse, keyId, keyIdBase64, publicKey } = await this.createKey(app, user)
 
         const at = await PasskeyClient.deploy(
@@ -91,6 +100,8 @@ export class PasskeyKit extends PasskeyBase {
             signTransaction: basicNodeSigner(this.walletKeypair, this.networkPassphrase).signTransaction
         })
 
+        logger.info('wallet.createWallet', { app, user, contractId })
+
         return {
             rawResponse,
             keyId,
@@ -104,6 +115,8 @@ export class PasskeyKit extends PasskeyBase {
         rpId?: string
         authenticatorSelection?: AuthenticatorSelectionCriteria
     }) {
+        const logger = LoggingService.get()
+        logger.info('wallet.createKey.start', { app, user })
         const now = new Date()
         const displayName = `${user} — ${now.toLocaleString()}`
         const { rpId, authenticatorSelection = {
@@ -137,12 +150,15 @@ export class PasskeyKit extends PasskeyBase {
         if (!this.keyId)
             this.keyId = id;
 
-        return {
+        const result = {
             rawResponse,
             keyId: base64url.toBuffer(id),
             keyIdBase64: id,
             publicKey: await this.getPublicKey(response),
         }
+
+        logger.info('wallet.createKey', { app, user, keyId: id })
+        return result
     }
 
     public async connectWallet(opts?: {
@@ -153,7 +169,9 @@ export class PasskeyKit extends PasskeyBase {
         // Consider putting this somewhere else??
         walletPublicKey?: string
     }) {
+        const logger = LoggingService.get()
         let { rpId, keyId, getContractId, walletPublicKey } = opts || {}
+        logger.info('wallet.connect.start', { keyId })
         let keyIdBuffer: Buffer
         let rawResponse: AuthenticationResponseJSON | undefined;
 
@@ -215,12 +233,15 @@ export class PasskeyKit extends PasskeyBase {
             networkPassphrase: this.networkPassphrase,
         })
 
-        return {
+        const result = {
             rawResponse,
             keyId: keyIdBuffer,
             keyIdBase64: keyId,
             contractId
         }
+
+        logger.info('wallet.connect', { contractId, keyId })
+        return result
     }
 
     public async signAuthEntry(
@@ -233,7 +254,9 @@ export class PasskeyKit extends PasskeyBase {
             expiration?: number
         }
     ) {
+        const logger = LoggingService.get()
         let { rpId, keyId, keypair, policy, expiration } = options || {}
+        logger.info('wallet.signAuthEntry.start', { keyId, policy })
 
         if ([keyId, keypair, policy].filter((arg) => !!arg).length > 1)
             throw new Error('Exactly one of `options.keyId`, `options.keypair`, or `options.policy` must be provided.');
@@ -410,6 +433,7 @@ export class PasskeyKit extends PasskeyBase {
         //     )
         // })
 
+        logger.info('wallet.signAuthEntry', { keyId, policy })
         return entry
     }
 
@@ -423,6 +447,8 @@ export class PasskeyKit extends PasskeyBase {
             expiration?: number
         }
     ) {
+        const logger = LoggingService.get()
+        logger.info('wallet.sign.start')
         if (!(txn instanceof AssembledTransaction)) {
             try {
                 txn = AssembledTransaction.fromXDR(this.wallet!.options, typeof txn === 'string' ? txn : txn.toXDR(), this.wallet!.spec)
@@ -446,6 +472,9 @@ export class PasskeyKit extends PasskeyBase {
                 return this.signAuthEntry(clone, options)
             },
         })
+
+        const xdr = typeof txn === 'string' ? txn : txn.toXDR()
+        logger.info('wallet.sign', { xdr })
 
         return txn
     }

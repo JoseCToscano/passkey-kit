@@ -36,6 +36,26 @@ This is a fully typed library so docs aren't provided, however there's a full ex
 
 Good luck, have fun, and change the world!
 
+## Logging
+
+```ts
+import { PasskeyKit } from "passkey-kit";
+import { createCustomTransport } from "passkey-kit/logging";
+import pinoDatadog from "pino-datadog-transport";
+
+const datadogStream = pinoDatadog({ /* your datadog config */ });
+const loggerTransport = createCustomTransport(datadogStream);
+
+const kit = new PasskeyKit({
+  logging: {
+    level: 'info',
+    transports: {
+      datadog: loggerTransport
+    }
+  }
+});
+```
+
 For any questions or to showcase your progress please join the `#passkeys` channel on our [Discord](https://discord.gg/stellardev).
 
 ## Deploy the event indexer

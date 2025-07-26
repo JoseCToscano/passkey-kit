@@ -6,6 +6,9 @@ import type { Signer } from "./types"
 import { AssembledTransaction } from "@stellar/stellar-sdk/minimal/contract"
 import { Durability } from "@stellar/stellar-sdk/minimal/rpc"
 import { version } from '../package.json'
+import { LoggingService } from './logging'
+import type { LoggingConfig } from './logging'
+import type pino from 'pino'
 
 // TODO set default headers in constructor
 
@@ -28,6 +31,7 @@ export class PasskeyServer extends PasskeyBase {
         mercuryUrl?: string,
         mercuryJwt?: string,
         mercuryKey?: string,
+        logging?: LoggingConfig | pino.Logger,
     }) {
         const {
             rpcUrl,
@@ -38,9 +42,13 @@ export class PasskeyServer extends PasskeyBase {
             mercuryUrl,
             mercuryJwt,
             mercuryKey,
+            logging,
         } = options
 
         super(rpcUrl)
+
+        if (logging)
+            LoggingService.init(logging)
 
         if (launchtubeUrl)
             this.launchtubeUrl = launchtubeUrl
@@ -159,9 +167,10 @@ export class PasskeyServer extends PasskeyBase {
     */
 
     public async send<T>(
-        txn: AssembledTransaction<T> | Tx | string, 
+        txn: AssembledTransaction<T> | Tx | string,
         fee?: number,
     ) {
+        const logger = LoggingService.get()
         if (!this.launchtubeUrl)
             throw new Error('Launchtube service not configured')
 
@@ -186,6 +195,7 @@ export class PasskeyServer extends PasskeyBase {
         if (this.launchtubeJwt)
             lt_headers.authorization = `Bearer ${this.launchtubeJwt}`
 
+        logger.info('server.send', { xdr: txn })
         return fetch(this.launchtubeUrl, {
             method: 'POST',
             headers: lt_headers,
