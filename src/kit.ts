@@ -8,6 +8,9 @@ import type { SignerKey, SignerLimits, SignerStore } from './types'
 import { PasskeyBase } from './base'
 import { AssembledTransaction, basicNodeSigner, type AssembledTransactionOptions, type Tx } from '@stellar/stellar-sdk/minimal/contract'
 import type { Server } from '@stellar/stellar-sdk/minimal/rpc'
+import { LoggingService } from './logging'
+import type { LoggingConfig } from './logging'
+import type pino from 'pino'
 
 export class PasskeyKit extends PasskeyBase {
     declare rpc: Server
@@ -34,11 +37,15 @@ export class PasskeyKit extends PasskeyBase {
         WebAuthn?: {
             startRegistration: typeof startRegistration,
             startAuthentication: typeof startAuthentication
-        }
+        },
+        logging?: LoggingConfig | pino.Logger
     }) {
-        const { rpcUrl, networkPassphrase, walletWasmHash, WebAuthn } = options
+        const { rpcUrl, networkPassphrase, walletWasmHash, WebAuthn, logging } = options
 
         super(rpcUrl)
+
+        if (logging)
+            LoggingService.init(logging)
 
         this.networkPassphrase = networkPassphrase
         // this account exists as the seed source for deploying new wallets
@@ -54,6 +61,8 @@ export class PasskeyKit extends PasskeyBase {
     }
 
     public async createWallet(app: string, user: string) {
+        const logger = LoggingService.get()
+        logger.info('wallet.create_wallet.start', { app, user })
         const { rawResponse, keyId, keyIdBase64, publicKey } = await this.createKey(app, user)
 
         const at = await PasskeyClient.deploy(
@@ -91,6 +100,8 @@ export class PasskeyKit extends PasskeyBase {
             signTransaction: basicNodeSigner(this.walletKeypair, this.networkPassphrase).signTransaction
         })
 
+        logger.info('wallet.create_wallet.success', { app, user, contractId })
+
         return {
             rawResponse,
             keyId,
@@ -104,6 +115,8 @@ export class PasskeyKit extends PasskeyBase {
         rpId?: string
         authenticatorSelection?: AuthenticatorSelectionCriteria
     }) {
+        const logger = LoggingService.get()
+        logger.info('wallet.create_key.start', { app, user })
         const now = new Date()
         const displayName = `${user} — ${now.toLocaleString()}`
         const { rpId, authenticatorSelection = {
@@ -137,12 +150,15 @@ export class PasskeyKit extends PasskeyBase {
         if (!this.keyId)
             this.keyId = id;
 
-        return {
+        const result = {
             rawResponse,
             keyId: base64url.toBuffer(id),
             keyIdBase64: id,
             publicKey: await this.getPublicKey(response),
         }
+
+        logger.info('wallet.create_key.success', { app, user, keyId: id })
+        return result
     }
 
     public async connectWallet(opts?: {
@@ -153,7 +169,9 @@ export class PasskeyKit extends PasskeyBase {
         // Consider putting this somewhere else??
         walletPublicKey?: string
     }) {
+        const logger = LoggingService.get()
         let { rpId, keyId, getContractId, walletPublicKey } = opts || {}
+        logger.info('wallet.connect.start', { keyId })
         let keyIdBuffer: Buffer
         let rawResponse: AuthenticationResponseJSON | undefined;
 
@@ -188,7 +206,8 @@ export class PasskeyKit extends PasskeyBase {
             await this.rpc.getContractData(contractId, xdr.ScVal.scvLedgerKeyContractInstance())
         }
         // if that fails look up from the `getContractId` function
-        catch {
+        catch (error) {
+            logger.debug('wallet.connect.fallback_lookup', { keyId, error: error instanceof Error ? error.message : String(error) })
             contractId = getContractId && await getContractId(keyId)
         }
 
@@ -200,14 +219,17 @@ export class PasskeyKit extends PasskeyBase {
 
             try {
                 await this.rpc.getContractData(contractId, xdr.ScVal.scvLedgerKeyContractInstance())
-            } catch {
+            } catch (error) {
+                logger.debug('wallet.connect.backwards_compat_failed', { contractId, error: error instanceof Error ? error.message : String(error) })
                 contractId = undefined
             }
         }
         ////
 
-        if (!contractId)
+        if (!contractId) {
+            logger.error('wallet.connect.failed', { keyId, message: 'Failed to connect wallet' })
             throw new Error('Failed to connect wallet')
+        }
 
         this.wallet = new PasskeyClient({
             contractId,
@@ -215,12 +237,15 @@ export class PasskeyKit extends PasskeyBase {
             networkPassphrase: this.networkPassphrase,
         })
 
-        return {
+        const result = {
             rawResponse,
             keyId: keyIdBuffer,
             keyIdBase64: keyId,
             contractId
         }
+
+        logger.info('wallet.connect.success', { contractId, keyId })
+        return result
     }
 
     public async signAuthEntry(
@@ -233,7 +258,9 @@ export class PasskeyKit extends PasskeyBase {
             expiration?: number
         }
     ) {
+        const logger = LoggingService.get()
         let { rpId, keyId, keypair, policy, expiration } = options || {}
+        logger.info('wallet.sign_auth_entry.start', { keyId, policy })
 
         if ([keyId, keypair, policy].filter((arg) => !!arg).length > 1)
             throw new Error('Exactly one of `options.keyId`, `options.keypair`, or `options.policy` must be provided.');
@@ -410,6 +437,7 @@ export class PasskeyKit extends PasskeyBase {
         //     )
         // })
 
+        logger.info('wallet.sign_auth_entry.success', { keyId, policy })
         return entry
     }
 
@@ -423,10 +451,13 @@ export class PasskeyKit extends PasskeyBase {
             expiration?: number
         }
     ) {
+        const logger = LoggingService.get()
+        logger.info('wallet.sign.start')
         if (!(txn instanceof AssembledTransaction)) {
             try {
                 txn = AssembledTransaction.fromXDR(this.wallet!.options, typeof txn === 'string' ? txn : txn.toXDR(), this.wallet!.spec)
-            } catch {
+            } catch (error) {
+                logger.debug('wallet.sign.xdr_conversion_fallback', { error: error instanceof Error ? error.message : String(error) })
                 if (!(txn instanceof AssembledTransaction)) {
                     const built = TransactionBuilder.fromXDR(typeof txn === 'string' ? txn : txn.toXDR(), this.networkPassphrase);
                     const operation = built.operations[0] as Operation.InvokeHostFunction;
@@ -446,6 +477,9 @@ export class PasskeyKit extends PasskeyBase {
                 return this.signAuthEntry(clone, options)
             },
         })
+
+        const xdr = typeof txn === 'string' ? txn : txn.toXDR()
+        logger.info('wallet.sign.success', { xdr })
 
         return txn
     }

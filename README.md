@@ -36,6 +36,97 @@ This is a fully typed library so docs aren't provided, however there's a full ex
 
 Good luck, have fun, and change the world!
 
+## Logging
+
+The Passkey Kit supports structured logging using Pino with customizable transports for sending logs to various destinations (console, files, monitoring services like Datadog, etc.).
+
+### Basic Usage
+
+```ts
+import { PasskeyKit } from "passkey-kit";
+
+// Basic console logging (default behavior)
+const kit = new PasskeyKit({
+  rpcUrl: 'https://soroban-rpc.testnet.stellar.org',
+  logging: {
+    level: 'info'  // 'debug' | 'info' | 'warn' | 'error'
+  }
+});
+```
+
+### Custom Transport Integration
+
+Add external monitoring services using custom transports:
+
+```ts
+import { PasskeyKit } from "passkey-kit";
+import { createCustomTransport } from "passkey-kit/logging";
+import pinoDatadog from "pino-datadog-transport";
+
+// Configure Datadog transport
+const datadogStream = pinoDatadog({
+  ddClientConf: { 
+    authMethods: { apiKeyAuth: process.env.DATADOG_API_KEY } 
+  },
+  ddServerConf: { 
+    site: "datadoghq.com" 
+  }
+});
+
+const datadogTransport = createCustomTransport(datadogStream);
+
+const kit = new PasskeyKit({
+  rpcUrl: 'https://soroban-rpc.testnet.stellar.org',
+  logging: {
+    level: 'info',
+    name: 'my-passkey-app',
+    transports: {
+      datadog: datadogTransport
+    }
+  }
+});
+```
+
+### Using Your Own Pino Logger
+
+```ts
+import { PasskeyKit } from "passkey-kit";
+import pino from "pino";
+
+const logger = pino({
+  level: 'debug',
+  transport: {
+    target: 'pino-pretty',
+    options: { colorize: true }
+  }
+});
+
+const kit = new PasskeyKit({
+  rpcUrl: 'https://soroban-rpc.testnet.stellar.org',
+  logging: logger  // Pass your own pino instance
+});
+```
+
+### Logged Events
+
+The following operations are automatically logged with structured data:
+
+- **Wallet Creation**: `wallet.create_wallet.start` / `wallet.create_wallet.success`
+- **Key Creation**: `wallet.create_key.start` / `wallet.create_key.success`  
+- **Wallet Connection**: `wallet.connect.start` / `wallet.connect.success`
+- **Transaction Signing**: `wallet.sign.start` / `wallet.sign.success`
+- **Auth Entry Signing**: `wallet.sign_auth_entry.start` / `wallet.sign_auth_entry.success`
+- **Server Operations**: `server.send.success`
+
+Each log entry includes relevant contextual data (user, app, contractId, XDR, etc.) for debugging and monitoring.
+
+### Log Levels
+
+- `debug`: Detailed diagnostic information, including fallback operations and error details
+- `info`: General operational events (wallet creation, signing, etc.)
+- `warn`: Important but non-critical issues  
+- `error`: Error conditions that prevent operations from completing
+
 For any questions or to showcase your progress please join the `#passkeys` channel on our [Discord](https://discord.gg/stellardev).
 
 ## Deploy the event indexer
